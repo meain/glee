@@ -90,7 +90,7 @@ func main() {
 	for i, f := range fwd {
 		fmt.Println(f.Func)
 
-		if i > 10 && f.Distance > 30 {
+		if i > 15 || f.Distance > 20 {
 			break
 		}
 	}
