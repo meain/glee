@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,16 +25,20 @@ type file struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	match := flag.String("match", "default", "matching algorithm (options: includes, default)")
+	flag.Parse()
+
+	args := flag.Args()
+	if len(args) < 1 {
 		log.Fatal("Usage: oogle <signature>")
 	}
 
-	uinput := os.Args[1]
+	uinput := args[0]
 	files := []file{}
 	root := "."
 
-	if len(os.Args) > 2 {
-		root = os.Args[2]
+	if len(args) > 1 {
+		root = args[1]
 	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -67,15 +73,95 @@ func main() {
 		funcs = append(funcs, tf...)
 	}
 
-	funcs = sortByDistance(funcs, uinput)
+	if match != nil {
+		inputs, outputs, err := getInputsAndOutput(uinput)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	for i, f := range funcs {
-		fmt.Println(f)
+		switch *match {
+		case "includes":
+			funcs = filterIncludes(funcs, inputs, outputs)
+		}
+	}
 
-		if i > 10 {
+	fwd := sortByDistance(funcs, uinput)
+
+	for i, f := range fwd {
+		fmt.Println(f.Func)
+
+		if i > 10 && f.Distance > 30 {
 			break
 		}
 	}
+}
+
+func filterIncludes(funcs []Func, inputs, outputs []string) []Func {
+	filteredFuncs := []Func{}
+
+	for _, f := range funcs {
+		// Early exit if we don't have enough values
+		if len(f.Args) < len(inputs) || len(f.Rets) < len(outputs) {
+			continue
+		}
+
+		if !contains(f.Args, inputs) || !contains(f.Rets, outputs) {
+			continue
+		}
+
+		filteredFuncs = append(filteredFuncs, f)
+	}
+
+	return filteredFuncs
+}
+
+func contains(items []string, tests []string) bool {
+	for _, test := range tests {
+		// escape [] , * and other special chars in input
+		for _, c := range []string{"[", "]", "*", ".", "{", "}", "(", ")"} {
+			test = strings.ReplaceAll(test, c, fmt.Sprintf("\\%s", c))
+		}
+
+		available := false
+		for _, arg := range items {
+			// reg := regexp.MustCompile(fmt.Sprintf(`\b%s\b`, input))
+			reg := regexp.MustCompile(test)
+			if reg.MatchString(arg) {
+				available = true
+				break
+			}
+		}
+
+		if !available {
+			return false
+		}
+	}
+	return true
+}
+
+func getInputsAndOutput(uinput string) ([]string, []string, error) {
+	inputs := []string{}
+	outputs := []string{}
+
+	uinput = strings.ReplaceAll(uinput, "(", " ")
+	uinput = strings.ReplaceAll(uinput, ")", " ")
+
+	splits := strings.Split(uinput, " -> ")
+	if len(splits) != 2 {
+		return nil, nil, fmt.Errorf("invalid input")
+	}
+
+	sps := strings.Split(splits[0], ",")
+	for _, sp := range sps {
+		inputs = append(inputs, strings.TrimSpace(sp))
+	}
+
+	sps = strings.Split(splits[1], ",")
+	for _, sp := range sps {
+		outputs = append(outputs, strings.TrimSpace(sp))
+	}
+
+	return inputs, outputs, nil
 }
 
 func getLanguage(filename string) string {
@@ -88,7 +174,7 @@ func getLanguage(filename string) string {
 	return lang
 }
 
-func sortByDistance(funcs []Func, uinput string) []Func {
+func sortByDistance(funcs []Func, uinput string) []FuncWithDistance {
 	distanceMap := []struct {
 		Func     Func
 		Distance int
@@ -107,12 +193,15 @@ func sortByDistance(funcs []Func, uinput string) []Func {
 		return distanceMap[i].Distance < distanceMap[j].Distance
 	})
 
-	funcs = []Func{}
+	fwd := []FuncWithDistance{}
 	for _, d := range distanceMap {
-		funcs = append(funcs, d.Func)
+		fwd = append(fwd, FuncWithDistance{
+			Func:     d.Func,
+			Distance: d.Distance,
+		})
 	}
 
-	return funcs
+	return fwd
 }
 
 type Func struct {
@@ -121,6 +210,11 @@ type Func struct {
 	Name string
 	Args []string
 	Rets []string
+}
+
+type FuncWithDistance struct {
+	Func     Func
+	Distance int
 }
 
 func (f Func) String() string {
