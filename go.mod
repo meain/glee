@@ -1,4 +1,4 @@
-module github.com/meain/oogle
+module github.com/meain/glee
 
 go 1.20
 

@@ -30,7 +30,7 @@ func main() {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		log.Fatal("Usage: oogle <signature>")
+		log.Fatal("Usage: glee <signature>")
 	}
 
 	uinput := args[0]
