@@ -2,6 +2,8 @@
 
 > [Hoogle](https://hoogle.haskell.org/) but for every language, using [tree-sitter](https://tree-sitter.github.io/tree-sitter/)
 
+*Currently only supports Golang, but the rest should be here soon.*
+
 ### Usage
 
 ```
