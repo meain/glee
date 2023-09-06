@@ -24,13 +24,25 @@ type file struct {
 	Path     string
 }
 
+func usage() {
+	name := filepath.Base(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] <signature>\n", name)
+	fmt.Println("Hoogle like search for functions in all languages") // TODO
+	fmt.Println("\nOptions:")
+	flag.PrintDefaults()
+	fmt.Printf("\nExample: %s -match includes '(Path, string) -> (Path, error)'\n", name)
+}
+
 func main() {
 	match := flag.String("match", "default", "matching algorithm (options: includes, default)")
+	flag.Usage = usage
+
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
-		log.Fatal("Usage: glee <signature>")
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	uinput := args[0]
@@ -82,6 +94,12 @@ func main() {
 		switch *match {
 		case "includes":
 			funcs = filterIncludes(funcs, inputs, outputs)
+		case "default":
+		// nothing here
+		default:
+			fmt.Printf("ERROR: Invalid match type '%s'\n", *match)
+			flag.Usage()
+			os.Exit(1)
 		}
 	}
 
