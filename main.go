@@ -5,28 +5,118 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/agnivade/levenshtein"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
 )
 
-func main() {
-	// sourceCode := []byte(`func func_name1 (arg1 int, arg2 string) (bool, error) { return 0, nil })
-	//                       func func_name2 (arg1 int, arg2 string) (bool, error) { return 0, nil })`)
-	sourceCode, err := os.ReadFile("main.go")
+const LINE_CLEAR = "\033[2K"
 
-	funcs, err := getFuncs(sourceCode, "golang")
+type file struct {
+	Language string
+	Path     string
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatal("Usage: oogle <signature>")
+	}
+
+	uinput := os.Args[1]
+	files := []file{}
+	root := "."
+
+	if len(os.Args) > 2 {
+		root = os.Args[2]
+	}
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err == nil {
+			if !info.IsDir() {
+				lang := getLanguage(info.Name())
+				if lang != "" {
+					files = append(files, file{Language: lang, Path: path})
+				}
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	for _, f := range funcs {
+	funcs := []Func{}
+	for _, f := range files {
+		fmt.Fprintf(os.Stderr, "%sProcessing %s\r", LINE_CLEAR, filepath.Base(f.Path))
+
+		sourceCode, err := os.ReadFile(f.Path)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		tf, err := getFuncs(sourceCode, f)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		funcs = append(funcs, tf...)
+	}
+
+	funcs = sortByDistance(funcs, uinput)
+
+	for i, f := range funcs {
 		fmt.Println(f)
+
+		if i > 10 {
+			break
+		}
 	}
 }
 
+func getLanguage(filename string) string {
+	// get language based on extension
+	lang := ""
+	switch filepath.Ext(filename) {
+	case ".go":
+		lang = "golang"
+	}
+	return lang
+}
+
+func sortByDistance(funcs []Func, uinput string) []Func {
+	distanceMap := []struct {
+		Func     Func
+		Distance int
+	}{}
+
+	for _, f := range funcs {
+		distance := levenshtein.ComputeDistance(uinput, f.Signature())
+		distanceMap = append(distanceMap, struct {
+			Func     Func
+			Distance int
+		}{Func: f, Distance: distance})
+	}
+
+	// sort by distance
+	sort.Slice(distanceMap, func(i, j int) bool {
+		return distanceMap[i].Distance < distanceMap[j].Distance
+	})
+
+	funcs = []Func{}
+	for _, d := range distanceMap {
+		funcs = append(funcs, d.Func)
+	}
+
+	return funcs
+}
+
 type Func struct {
+	Path string
 	Loc  []int
 	Name string
 	Args []string
@@ -34,25 +124,38 @@ type Func struct {
 }
 
 func (f Func) String() string {
-	return fmt.Sprintf("%s ( %s ) ( %s )", f.Name, strings.Join(f.Args, ", "), strings.Join(f.Rets, ", "))
+	return fmt.Sprintf(
+		"%s:%s:%s:%s (%s) -> (%s)",
+		f.Path,
+		strconv.Itoa(f.Loc[0]),
+		strconv.Itoa(f.Loc[1]),
+		f.Name,
+		strings.Join(f.Args, ", "),
+		strings.Join(f.Rets, ", "),
+	)
 }
 
-func getFuncs(sourceCode []byte, langString string) ([]Func, error) {
+func (f Func) Signature() string {
+	return fmt.Sprintf("( %s ) -> ( %s )", strings.Join(f.Args, ", "), strings.Join(f.Rets, ", "))
+}
+
+func getFuncs(sourceCode []byte, f file) ([]Func, error) {
 	var (
 		lang         *sitter.Language
 		queryPattern map[string]string
 	)
 
-	switch langString {
+	switch f.Language {
 	case "golang":
 		lang = golang.GetLanguage()
 		queryPattern = map[string]string{
 			"function": "(function_declaration name: (identifier) @name) @func",
-			"input":    "(function_declaration parameters: (parameter_list (parameter_declaration type: (type_identifier) @type)))",
-			"output":   "(function_declaration result: (parameter_list (parameter_declaration type: (type_identifier) @type)))",
+			"input":    "(function_declaration parameters: (parameter_list (parameter_declaration type: (_) @type)))",
+			"output": `(function_declaration result: (parameter_list (parameter_declaration type: (_) @type)))
+                       (function_declaration result: [(type_identifier) (pointer_type) (slice_type)] @type)`,
 		}
 	default:
-		return nil, fmt.Errorf("language %s not supported", langString)
+		return nil, fmt.Errorf("language %s not supported", f.Language)
 	}
 
 	node, err := sitter.ParseCtx(context.Background(), sourceCode, lang)
@@ -84,6 +187,7 @@ func getFuncs(sourceCode []byte, langString string) ([]Func, error) {
 		point := m.Captures[0].Node.StartPoint()
 
 		f := Func{
+			Path: f.Path,
 			Loc:  []int{int(point.Row), int(point.Column)},
 			Name: m.Captures[1].Node.Content(sourceCode),
 		}
@@ -109,6 +213,7 @@ func getTypes(node *sitter.Node, sourceCode []byte, query *sitter.Query) []strin
 		}
 
 		m = cursor.FilterPredicates(m, sourceCode)
+
 		types = append(types, m.Captures[0].Node.Content(sourceCode))
 	}
 
