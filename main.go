@@ -165,7 +165,6 @@ func getInputsAndOutput(uinput string) ([]string, []string, error) {
 }
 
 func getLanguage(filename string) string {
-	// get language based on extension
 	lang := ""
 	switch filepath.Ext(filename) {
 	case ".go":
@@ -174,6 +173,8 @@ func getLanguage(filename string) string {
 	return lang
 }
 
+// sortByDistance sorts the items by levenshtein distance
+// TODO(meain): make it so that ordering of args do not affect lev distance
 func sortByDistance(funcs []Func, uinput string) []FuncWithDistance {
 	distanceMap := []struct {
 		Func     Func
@@ -239,6 +240,7 @@ func getFuncs(sourceCode []byte, f file) ([]Func, error) {
 		queryPattern map[string]string
 	)
 
+	// TODO(meain): Unify this and getLanguage conditional into a global dict
 	switch f.Language {
 	case "golang":
 		lang = golang.GetLanguage()
